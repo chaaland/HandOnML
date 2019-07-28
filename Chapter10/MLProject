@@ -1,0 +1,25 @@
+name: fashion_mnist
+conda_env: conda.yaml
+entry_points: 
+    main:
+        parameters:
+            image-width: {type: int, default: 28}
+            image-height: {type: int, default: 28}
+            n-epochs: {type: int, default: 10
+            learning-rate: {type: float, default: 0.01}
+            batch-size: {type: int, default: 32}
+            n-classes: {type: int, default: 10}
+            n-hidden {type: int, default: 2}
+            hidden-dim {type: int, default: 32}
+
+        command: "python ann_training.py
+                --image-width {image-width}
+                --image-height {image-height}
+                --n-epochs {n-epochs}
+                --learning-rate {learning-rate}
+                --batch-size {batch-size}
+                --n-classes {n-classes}
+                --n-hidden {n-hidden}
+                --hidden-dim {hidden-dim}"
+
+
