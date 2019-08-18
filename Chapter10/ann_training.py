@@ -3,19 +3,21 @@ import argparse
 import tensorflow as tf
 import numpy as np
 import mlflow
+# import mlflow.tensorflow
 from tensorflow.examples.tutorials.mnist import input_data
 
 pjoin = os.path.join
 
+
 def artificial_neural_network(
-    X,
-    y,
-    n_hidden,
-    hidden_dim,
-    n_outputs,
-    lr,
+    X: tf.placeholder,
+    y: tf.placeholder,
+    n_hidden: int,
+    hidden_dim: int,
+    n_outputs: int,
+    lr: float,
 ):
-    """Trains an artificial neural network
+    """Build an artificial neural network with a gradient descent optimizer
     
     :params X:
     :params y:
@@ -30,7 +32,7 @@ def artificial_neural_network(
     
     with tf.variable_scope("metrics", reuse=tf.AUTO_REUSE):
         xentropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=y, logits=logits)
-        data_loss = tf.reduce_mean(xentropy_loss, name="data_loss")
+        data_cost = tf.reduce_mean(xentropy_loss, name="data_loss")
         top1 = tf.nn.in_top_k(logits, y, 1)
         top3 = tf.nn.in_top_k(logits, y, 3)
 
@@ -42,21 +44,22 @@ def artificial_neural_network(
     with tf.variable_scope("train", reuse=tf.AUTO_REUSE):
         global_step = tf.get_variable(name="global_step", dtype=tf.int32, initializer=tf.constant(0), trainable=False)
         optimizer = tf.train.GradientDescentOptimizer(learning_rate=lr)
-        training_op = optimizer.minimize(data_loss, global_step=global_step)
+        training_op = optimizer.minimize(data_cost, global_step=global_step)
         
     with tf.variable_scope("save", reuse=tf.AUTO_REUSE):
         saver = tf.train.Saver(name="saver")
         
-#     with tf.variable_scope("summaries", reuse=tf.AUTO_REUSE):   
-    tf.summary.scalar("data_loss_summary", data_loss)
-    tf.summary.scalar("accuracy", accuracy)
-    tf.summary.scalar("top3_accuracy", top3_accuracy)
+    with tf.variable_scope("summaries", reuse=tf.AUTO_REUSE):   
+        tf.summary.scalar("data_cost_summary", data_cost)
+        tf.summary.scalar("accuracy", accuracy)
+        tf.summary.scalar("top3_accuracy", top3_accuracy)
 
     merged = tf.summary.merge_all()
     
-    return saver, training_op, y_proba, data_loss, merged
+    return saver, training_op, y_proba, data_cost, merged
 
 
+# mlflow.tensorflow.autolog()
 def train_fashion_mnist_ann(
     fashion_mnist,
     image_width,
@@ -82,22 +85,27 @@ def train_fashion_mnist_ann(
     :param checkpoint_dir: directory to checkpoint the model
     """
     with mlflow.start_run():
+        run_uuid = mlflow.active_run().info.run_uuid
+        print(f"-" * 50, flush=True)
+        print(f"MLflow Run ID: {run_uuid}", flush=True)
+        print(f"-" * 50, flush=True)
+
         mlflow.log_params(
             {
                 "n_epochs": n_epochs,
                 "learning rate": learning_rate,
+                "batch_size": batch_size,
                 "n_hidden": n_hidden,
                 "hidden_dim": hidden_dim,
-                "batch_size": batch_size,
             }
         )
         tf.reset_default_graph()
 
-        # train_dir = pjoin("tf_logs", "train")
-        # validation_dir = pjoin("tf_logs", "test")
+        train_dir = pjoin("tf_logs", "train", run_uuid)
+        validation_dir = pjoin("tf_logs", "test", run_uuid)
 
-    #     # os.makedirs(train_dir, exist_ok=True)
-    #     # os.makedirs(validation_dir, exist_ok=True)
+        os.makedirs(train_dir, exist_ok=True)
+        os.makedirs(validation_dir, exist_ok=True)
         if checkpoint_dir is not None:
             os.makedirs(checkpoint_dir, exist_ok=True)
         log_every = 1
@@ -105,10 +113,12 @@ def train_fashion_mnist_ann(
         # n_validate = fashion_mnist.validation.num_examples
 
         X = tf.placeholder(tf.float32, shape=(None, image_width * image_height), name="X")
-        y = tf.placeholder(tf.int64, shape=(None), name="y")
-        n_train_batches = int(np.ceil(n_train / batch_size))
+        y = tf.placeholder(tf.int64, shape=(None,), name="y")
+        n_train_batches, remainder = divmod(n_train, batch_size)
+        if remainder > 0:
+            n_train_batches += 1
 
-        saver, training_op, _, data_loss, merged = artificial_neural_network(
+        saver, training_op, _, data_cost, merged = artificial_neural_network(
             X,
             y,
             n_hidden,
@@ -116,14 +126,14 @@ def train_fashion_mnist_ann(
             n_classes,
             learning_rate
         )
-        # train_writer = tf.summary.FileWriter(train_dir, tf.get_default_graph())
-        # test_writer = tf.summary.FileWriter(validation_dir, tf.get_default_graph())
+        train_writer = tf.summary.FileWriter(train_dir, tf.get_default_graph())
+        test_writer = tf.summary.FileWriter(validation_dir, tf.get_default_graph())
 
         with tf.Session() as sess:
-            try:
-                saver.restore(sess, checkpoint_dir)
-            except Exception:
-                sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
+            # try:
+            #     saver.restore(sess, checkpoint_dir)
+            # except Exception:
+            sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
 
             with tf.variable_scope("train", reuse=tf.AUTO_REUSE):
                 global_step = tf.get_variable("global_step", dtype=tf.int32)
@@ -131,23 +141,36 @@ def train_fashion_mnist_ann(
             for i in range(n_epochs):
                 for _ in range(n_train_batches):
                     X_train_batch, y_train_batch = fashion_mnist.train.next_batch(batch_size)
-                    _, train_loss, train_summ = sess.run([training_op, data_loss, merged], feed_dict={X: X_train_batch, y: y_train_batch})
+                    _, train_cost, train_summ = sess.run(
+                        [training_op, data_cost, merged], 
+                        feed_dict={
+                            X: X_train_batch, 
+                            y: y_train_batch},
+                    )
 
                 if i % log_every == 0:
-                    validation_summ, validation_loss, g_step = sess.run([merged, data_loss, global_step], feed_dict={X: fashion_mnist.validation.images, y: fashion_mnist.validation.labels})
+                    nodes_to_eval = [merged, data_cost, global_step]
+                    data_to_feed = {X: fashion_mnist.validation.images, y: fashion_mnist.validation.labels}
+                    validation_summ, validation_loss, g_step = sess.run(
+                        nodes_to_eval,
+                        feed_dict=data_to_feed,
+                    )
                     epoch = (g_step + 1) // n_train_batches
                     mlflow.log_metrics({
                         "validation_loss": validation_loss,
-                        "train_loss": train_loss,
+                        "train_loss": train_cost,
                     }, step=epoch)
-                    # train_writer.add_summary(train_summ, epoch)
-                    # test_writer.add_summary(validation_summ, epoch)
-                    if checkpoint_dir is not None:
-                        save_path = saver.save(sess, checkpoint_dir)
-            if checkpoint_dir:
-                save_path = saver.save(sess, checkpoint_dir)
-        # train_writer.close()
-        # test_writer.close()
+                    train_writer.add_summary(train_summ, epoch)
+                    test_writer.add_summary(validation_summ, epoch)
+                    # if checkpoint_dir is not None:
+                    #     save_path = saver.save(sess, checkpoint_dir)
+            # if checkpoint_dir:
+            #     save_path = saver.save(sess, checkpoint_dir)
+        train_writer.close()
+        test_writer.close()
+
+        mlflow.log_artifacts(train_dir)
+        mlflow.log_artifacts(validation_dir)
 
 
 if __name__ == "__main__":
@@ -167,7 +190,6 @@ if __name__ == "__main__":
         pjoin("data", "fashion"),
         source_url="http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/",
     )
-    # print(args.checkpoint_dir, flush=True)
 
     train_fashion_mnist_ann(
         fashion_mnist_data_gen,
