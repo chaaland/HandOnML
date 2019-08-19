@@ -2,6 +2,7 @@ import os
 import argparse
 import tensorflow as tf
 import numpy as np
+from hyperopt import STATUS_OK
 import mlflow
 # import mlflow.tensorflow
 from tensorflow.examples.tutorials.mnist import input_data
@@ -60,17 +61,17 @@ def artificial_neural_network(
 
 
 # mlflow.tensorflow.autolog()
-def train_fashion_mnist_ann(
+def fit_fashion_mnist_ann(
     fashion_mnist,
-    image_width,
-    image_height,
-    n_epochs,
-    learning_rate,
-    batch_size,
-    n_classes,
-    n_hidden,
-    hidden_dim,
-    checkpoint_dir,
+    image_width: int=28,
+    image_height: int=28,
+    n_classes: int=10,
+    n_epochs: int=10,
+    learning_rate: float=0.01,
+    batch_size: int=32,
+    n_hidden: int=2,
+    hidden_dim: int=32,
+    # checkpoint_dir,
 ):
     """
     :param fashion_mnist: 
@@ -93,7 +94,7 @@ def train_fashion_mnist_ann(
         mlflow.log_params(
             {
                 "n_epochs": n_epochs,
-                "learning rate": learning_rate,
+                "learning_rate": learning_rate,
                 "batch_size": batch_size,
                 "n_hidden": n_hidden,
                 "hidden_dim": hidden_dim,
@@ -106,11 +107,9 @@ def train_fashion_mnist_ann(
 
         os.makedirs(train_dir, exist_ok=True)
         os.makedirs(validation_dir, exist_ok=True)
-        if checkpoint_dir is not None:
-            os.makedirs(checkpoint_dir, exist_ok=True)
+
         log_every = 1
         n_train = fashion_mnist.train.num_examples
-        # n_validate = fashion_mnist.validation.num_examples
 
         X = tf.placeholder(tf.float32, shape=(None, image_width * image_height), name="X")
         y = tf.placeholder(tf.int64, shape=(None,), name="y")
@@ -130,9 +129,6 @@ def train_fashion_mnist_ann(
         test_writer = tf.summary.FileWriter(validation_dir, tf.get_default_graph())
 
         with tf.Session() as sess:
-            # try:
-            #     saver.restore(sess, checkpoint_dir)
-            # except Exception:
             sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
 
             with tf.variable_scope("train", reuse=tf.AUTO_REUSE):
@@ -160,18 +156,24 @@ def train_fashion_mnist_ann(
                         "validation_loss": validation_loss,
                         "train_loss": train_cost,
                     }, step=epoch)
+
                     train_writer.add_summary(train_summ, epoch)
                     test_writer.add_summary(validation_summ, epoch)
-                    # if checkpoint_dir is not None:
-                    #     save_path = saver.save(sess, checkpoint_dir)
-            # if checkpoint_dir:
-            #     save_path = saver.save(sess, checkpoint_dir)
+        
         train_writer.close()
         test_writer.close()
 
         mlflow.log_artifacts(train_dir)
         mlflow.log_artifacts(validation_dir)
 
+        summary_proto = tf.Summary()
+        summary_proto.ParseFromString(validation_summ)
+
+        for val in summary_proto.value:
+            if val.tag.endswith("/accuracy"):
+                val_acc = val.simple_value
+
+        return {"loss": -val_acc, "status": STATUS_OK}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -191,7 +193,7 @@ if __name__ == "__main__":
         source_url="http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/",
     )
 
-    train_fashion_mnist_ann(
+    fit_fashion_mnist_ann(
         fashion_mnist_data_gen,
         args.image_width,
         args.image_height,
@@ -201,5 +203,7 @@ if __name__ == "__main__":
         args.n_classes,
         args.n_hidden,
         args.hidden_dim,
-        args.checkpoint_dir,
+        # args.checkpoint_dir,
     )
+    # trials = Trials()
+    # best = fmin(f_nn, space, algo=tpe.suggest, max_evals=50, trials=trials)
