@@ -4,6 +4,7 @@ import tensorflow as tf
 import numpy as np
 from hyperopt import STATUS_OK
 import mlflow
+from datetime import datetime
 # import mlflow.tensorflow
 from tensorflow.examples.tutorials.mnist import input_data
 
@@ -102,8 +103,9 @@ def fit_fashion_mnist_ann(
         )
         tf.reset_default_graph()
 
-        train_dir = pjoin("tf_logs", "train", run_uuid)
-        validation_dir = pjoin("tf_logs", "test", run_uuid)
+        ymd = datetime.now().strftime("%Y%m%d")
+        train_dir = pjoin("tf_logs", "train", ymd, run_uuid)
+        validation_dir = pjoin("tf_logs", "test", ymd, run_uuid)
 
         os.makedirs(train_dir, exist_ok=True)
         os.makedirs(validation_dir, exist_ok=True)
