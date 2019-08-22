@@ -51,7 +51,7 @@ def artificial_neural_network(
         saver = tf.train.Saver(name="saver")
         
     with tf.variable_scope("summaries", reuse=tf.AUTO_REUSE):   
-        tf.summary.scalar("data_cost_summary", data_cost)
+        tf.summary.scalar("data_cost", data_cost)
         tf.summary.scalar("accuracy", accuracy)
         tf.summary.scalar("top3_accuracy", top3_accuracy)
 
@@ -127,6 +127,7 @@ def fit_fashion_mnist_ann(
         )
         train_writer = tf.summary.FileWriter(train_dir, tf.get_default_graph())
         test_writer = tf.summary.FileWriter(validation_dir, tf.get_default_graph())
+        summary_proto = tf.Summary()
 
         with tf.Session() as sess:
             sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
@@ -147,15 +148,25 @@ def fit_fashion_mnist_ann(
                 if i % log_every == 0:
                     nodes_to_eval = [merged, data_cost, global_step]
                     data_to_feed = {X: fashion_mnist.validation.images, y: fashion_mnist.validation.labels}
-                    validation_summ, validation_loss, g_step = sess.run(
+                    validation_summ, validation_cost, g_step = sess.run(
                         nodes_to_eval,
                         feed_dict=data_to_feed,
                     )
                     epoch = (g_step + 1) // n_train_batches
-                    mlflow.log_metrics({
-                        "validation_loss": validation_loss,
-                        "train_loss": train_cost,
-                    }, step=epoch)
+
+                    summary_proto.ParseFromString(train_summ)
+
+                    mlflow_metrics = {}
+                    for val in summary_proto.value:
+                        label = "train_" + val.tag.split("/")[-1]
+                        mlflow_metrics[label] = val.simple_value
+
+                    summary_proto.ParseFromString(validation_summ)
+                    for val in summary_proto.value:
+                        label = "validation_" + val.tag.split("/")[-1]
+                        mlflow_metrics[label] = val.simple_value
+
+                    mlflow.log_metrics(mlflow_metrics, step=epoch)
 
                     train_writer.add_summary(train_summ, epoch)
                     test_writer.add_summary(validation_summ, epoch)
@@ -166,7 +177,6 @@ def fit_fashion_mnist_ann(
         mlflow.log_artifacts(train_dir)
         mlflow.log_artifacts(validation_dir)
 
-        summary_proto = tf.Summary()
         summary_proto.ParseFromString(validation_summ)
 
         for val in summary_proto.value:

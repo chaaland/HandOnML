@@ -1,17 +1,29 @@
 import os
+import pickle as pkl
 import numpy as np
 from hyperopt import fmin, tpe, hp, Trials
 from tensorflow.examples.tutorials.mnist import input_data
 from ann_training import fit_fashion_mnist_ann
-import functools
 
 pjoin = os.path.join
 
 
 fashion_mnist_data_gen = input_data.read_data_sets(
-        pjoin("data", "fashion"),
-        source_url="http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/",
-    )
+    pjoin("data", "fashion"),
+    source_url="http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/",
+)
+
+max_evals = 1 
+
+try:
+    trials = pkl.load(open("hyper_opt_trials.pkl", "rb"))
+    print("Loaded saved HyperOpt Trials object", flush=True)
+    n_prev_trials = len(trials.trials)
+    max_evals += n_prev_trials
+    print(f"Rerunning from {n_prev_trials} trials.", flush=True)
+except:
+    trials = Trials()
+    print("No saved HyperOpt Trials object found. Starting from scratch", flush=True)
 
 space = {
     "image_width": 28,
@@ -24,15 +36,15 @@ space = {
     "hidden_dim": hp.choice("hidden_dim", [2**i for i in range(5,10)]),
 }
 
-trials = Trials()
 best = fmin(
     fn=lambda hps: fit_fashion_mnist_ann(fashion_mnist_data_gen, **hps),
-    # fn=functools.partial(
-    #     fit_fashion_mnist_ann,
-    #     fashion_mnist_data_gen,
-    # ),
-    space=space, 
+    space=space,
     algo=tpe.suggest, 
-    max_evals=5, 
+    max_evals=max_evals,
     trials=trials,
 )
+
+pkl.dump(trials, open("hyper_opt_trials.pkl", "wb"))
+
+best_acc = max(-trial_data["result"]["loss"] for trial_data in trials.trials)
+print(f"Best Trial: {best.best_trail}", flush=True)
